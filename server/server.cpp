@@ -1,84 +1,46 @@
-#include <server.h>
+#include "server.h"
+#include <QHostAddress>
 
-Server::Server()
-{
-    nextBlockSize = 0;
-
-    if (this->listen(QHostAddress::Any, 2323))
-    {
-        qDebug() << "Start server...";
-    }
-
-    else
-    {
-        qDebug() << "Error start server...";
-    }
-}
+Server::Server(QObject *parent) : QTcpServer(parent) {}
 
 void Server::incomingConnection(qintptr socketDescriptor)
 {
-    socket = new QTcpSocket;
-    socket->setSocketDescriptor(socketDescriptor);
-    connect(socket, &QTcpSocket::readyRead, this, &Server::slotReadyRead);
-    connect(socket, &QTcpSocket::disconnected, socket, &Server::deleteLater);
-    Sockets.push_back(socket);
-    qDebug() << "Client is connected..." << socketDescriptor;
+    QTcpSocket *socket = new QTcpSocket(this);
+    if (!socket->setSocketDescriptor(socketDescriptor)) {
+        emit logMessage(tr("Ошибка подключения: %1").arg(socket->errorString()));
+        delete socket;
+        return;
+    }
+
+    QString clientId = QString("Клиент #%1").arg(m_nextClientId++);
+    m_clients.insert(socket, clientId);
+
+    connect(socket, &QTcpSocket::readyRead, this, &Server::onReadyRead);
+    connect(socket, &QTcpSocket::disconnected, this, &Server::onDisconnected);
+
+    emit newConnection(clientId, socket);
+    emit logMessage(tr("Новое подключение: %1").arg(clientId));
 }
 
-void Server::slotReadyRead()
+void Server::onReadyRead()
 {
-    socket = (QTcpSocket*)sender();
-    QDataStream in(socket);
-    in.setVersion(QDataStream::Qt_6_2);
+    QTcpSocket *socket = qobject_cast<QTcpSocket*>(sender());
+    if (!socket) return;
 
-    if (in.status() == QDataStream::Ok)
-    {
-        for (;;)
-        {
-            if (nextBlockSize == 0)
-            {
-                qDebug() << "nextBlockSize = 0";
-
-                if (socket->bytesAvailable() < 2)
-                {
-                    qDebug() << "Data < 2 bytes, break";
-                    break;
-                }
-                in >> nextBlockSize;
-                qDebug() << "nextBlockSize = " << nextBlockSize;
-            }
-
-            if (socket->bytesAvailable() < nextBlockSize)
-            {
-                qDebug() << "Data is not full, break";
-                break;
-            }
-
-            QString mssng;
-            in >> mssng;
-            nextBlockSize = 0;
-            qDebug() << mssng;
-            SendToClient(mssng);
-            break;
-        }
-    }
-
-    else
-    {
-        qDebug() << "DataStream eror...";
-    }
+    QByteArray data = socket->readAll();
+    // Обработка входящих данных
+    emit logMessage(tr("Данные от %1: %2").arg(m_clients.value(socket), QString::fromUtf8(data)));
 }
 
-void Server::SendToClient(QString mssng)
+void Server::onDisconnected()
 {
-    Data.clear();
-    QDataStream out(&Data, QIODevice::WriteOnly);
-    out.setVersion(QDataStream::Qt_6_2);
-    out << quint16(0) << mssng;
-    out.device()->seek(0);
-    out << quint16(Data.size() - sizeof(quint16));
-    for (int number = 0; number < Sockets.size(); number++)
-    {
-        Sockets[number]->write(Data);
-    }
+    QTcpSocket *socket = qobject_cast<QTcpSocket*>(sender());
+    if (!socket) return;
+
+    QString clientInfo = m_clients.value(socket);
+    m_clients.remove(socket);
+    socket->deleteLater();
+
+    emit clientDisconnected(socket);
+    emit logMessage(tr("Отключение: %1").arg(clientInfo));
 }
