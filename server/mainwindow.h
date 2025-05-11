@@ -1,36 +1,33 @@
+// client/mainwindow.h
+
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
 #include <QMainWindow>
 #include <QTcpSocket>
-#include <QHash>
 
-class Server; // Предварительное объявление
-
-namespace Ui {
-class MainWindow;
-}
+QT_BEGIN_NAMESPACE
+namespace Ui { class MainWindow; }
+QT_END_NAMESPACE
 
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget *parent = nullptr);
+    MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
-public slots:
-    void logMessage(const QString &message);
-    void addClient(const QString &id, QTcpSocket *socket);
-    void removeClient(QTcpSocket *socket);
-
 private slots:
-    void onDisconnectClient();
-    void onDisconnectAll();
+    void on_connectButton_clicked();
+    void on_sendButton_clicked();
+    void on_readyRead();
+    void on_disconnectButton_clicked();
 
 private:
     Ui::MainWindow *ui;
-    Server *m_server;  // Используем префикс m_ для членов класса
-    QHash<QTcpSocket*, QString> m_clients; // Хранение клиентов
+    QTcpSocket *socket;
+    bool isConnected = false;
 };
+
 #endif // MAINWINDOW_H

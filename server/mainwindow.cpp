@@ -1,34 +1,18 @@
+// client/mainwindow.cpp
+
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
-#include "server.h" // Добавляем include для Server
-#include <QMessageBox>
-#include <QDateTime>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
-    , m_server(new Server(this)) // Инициализация m_server
+    , socket(new QTcpSocket(this))
 {
     ui->setupUi(this);
-
-    // Проверка элементов UI
-    if (!ui->logTextEdit || !ui->clientList) {
-        qCritical("Critical UI elements not found!");
-        return;
-    }
-
-    // Настройка сервера
-    if (!m_server->listen(QHostAddress::Any, 12345)) {
-        logMessage("Server error: " + m_server->errorString());
-    } else {
-        logMessage("Server started on port " + QString::number(m_server->serverPort()));
-    }
-
-    // Подключение сигналов
-    connect(m_server, &Server::newConnection, this, &MainWindow::addClient);
-    connect(m_server, &Server::clientDisconnected, this, &MainWindow::removeClient);
-    connect(ui->disconnectButton, &QPushButton::clicked, this, &MainWindow::onDisconnectClient);
-    connect(ui->disconnectAllButton, &QPushButton::clicked, this, &MainWindow::onDisconnectAll);
+    connect(ui->connectButton, &QPushButton::clicked, this, &MainWindow::on_connectButton_clicked);
+    connect(ui->sendButton, &QPushButton::clicked, this, &MainWindow::on_sendButton_clicked);
+    connect(socket, &QTcpSocket::readyRead, this, &MainWindow::on_readyRead);
+    connect(ui->disconnectButton, &QPushButton::clicked, this, &MainWindow::on_disconnectButton_clicked);
 }
 
 MainWindow::~MainWindow()
@@ -36,64 +20,62 @@ MainWindow::~MainWindow()
     delete ui;
 }
 
-void MainWindow::logMessage(const QString &message)
+void MainWindow::on_connectButton_clicked()
 {
-    ui->logTextEdit->append(QDateTime::currentDateTime().toString("[hh:mm:ss] ") + message);
-}
+    if (isConnected) return;
 
-void MainWindow::addClient(const QString &id, QTcpSocket *socket)
-{
-    QString clientInfo = QString("%1 (%2:%3)")
-                        .arg(id)
-                        .arg(socket->peerAddress().toString())
-                        .arg(socket->peerPort());
-
-    QListWidgetItem *item = new QListWidgetItem(clientInfo, ui->clientList);
-    item->setData(Qt::UserRole, QVariant::fromValue(socket));
-    m_clients[socket] = clientInfo;
-
-    logMessage("Client connected: " + clientInfo);
-}
-
-void MainWindow::removeClient(QTcpSocket *socket)
-{
-    if (m_clients.contains(socket)) {
-        logMessage("Client disconnected: " + m_clients.value(socket));
-        m_clients.remove(socket);
-
-        for (int i = 0; i < ui->clientList->count(); ++i) {
-            if (ui->clientList->item(i)->data(Qt::UserRole).value<QTcpSocket*>() == socket) {
-                delete ui->clientList->takeItem(i);
-                break;
-            }
-        }
-    }
-}
-
-void MainWindow::onDisconnectClient()
-{
-    QListWidgetItem *item = ui->clientList->currentItem();
-    if (!item) return;
-
-    QTcpSocket *socket = item->data(Qt::UserRole).value<QTcpSocket*>();
-    if (socket) {
-        socket->disconnectFromHost();
-    }
-}
-
-void MainWindow::onDisconnectAll()
-{
-    if (m_clients.isEmpty()) {
-        logMessage("No clients connected");
+    QString username = ui->usernameEdit->text().trimmed();
+    if (username.isEmpty()) {
+        ui->chatEdit->append("Введите имя перед подключением.");
         return;
     }
 
-    if (QMessageBox::question(this, "Disconnect all",
-                            "Disconnect all clients?",
-                            QMessageBox::Yes|QMessageBox::No) == QMessageBox::Yes) {
-        for (QTcpSocket *socket : m_clients.keys()) {
-            socket->disconnectFromHost();
-        }
-        logMessage("Disconnected all clients (" + QString::number(m_clients.size()) + ")");
+    socket->connectToHost("127.0.0.1", 1234);
+    if (socket->waitForConnected(1000)) {
+        socket->write((username + "\n").toUtf8());
+        isConnected = true;
+        ui->chatEdit->append("Подключено как: " + username);
+    } else {
+        ui->chatEdit->append("Ошибка подключения к серверу.");
     }
+}
+
+void MainWindow::on_sendButton_clicked()
+{
+    if (!isConnected) {
+        ui->chatEdit->append("Сначала подключитесь к серверу.");
+        return;
+    }
+
+    QString message = ui->messageEdit->text().trimmed();
+    QString recipient = ui->recipientEdit->text().trimmed();
+
+    if (message.isEmpty()) return;
+
+    if (!recipient.isEmpty()) {
+        socket->write(QString("/to:%1:%2\n").arg(recipient, message).toUtf8());
+    } else {
+        socket->write(message.toUtf8() + "\n");
+    }
+
+    ui->messageEdit->clear();
+}
+
+void MainWindow::on_readyRead()
+{
+    QByteArray data = socket->readAll();
+    ui->chatEdit->append(QString::fromUtf8(data));
+}
+void MainWindow::on_disconnectButton_clicked()
+{
+    if (!isConnected) {
+        ui->chatEdit->append("Нет активного подключения.");
+        return;
+    }
+
+    socket->disconnectFromHost();
+    socket->close();
+    isConnected = false;
+
+    ui->chatEdit->append("Отключено от сервера.");
 }
