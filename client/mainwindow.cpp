@@ -1,16 +1,18 @@
+// client/mainwindow.cpp
+
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
-#include <QMessageBox>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
+    , socket(new QTcpSocket(this))
 {
     ui->setupUi(this);
-    socket = new QTcpSocket(this);
-    connect(socket, &QTcpSocket::readyRead, this, &MainWindow::slotReadyRead);
-    connect(socket, &QTcpSocket::disconnected, this, &MainWindow::deleteLater);
-    nextBlockSize = 0;
+    connect(ui->connectButton, &QPushButton::clicked, this, &MainWindow::on_connectButton_clicked);
+    connect(ui->sendButton, &QPushButton::clicked, this, &MainWindow::on_sendButton_clicked);
+    connect(socket, &QTcpSocket::readyRead, this, &MainWindow::on_readyRead);
+    connect(ui->disconnectButton, &QPushButton::clicked, this, &MainWindow::on_disconnectButton_clicked);
 }
 
 MainWindow::~MainWindow()
@@ -18,148 +20,62 @@ MainWindow::~MainWindow()
     delete ui;
 }
 
-void MainWindow::on_pushButton_clicked()
+void MainWindow::on_connectButton_clicked()
 {
-    if (ui->lineEdit_3->text() != "")
-    {
-        username = ui->lineEdit_3->text();
-        socket->connectToHost(ui->lineEdit_2->text(), 2323);
-        if (socket->waitForConnected(3000))
-        {
-            SendToServerConnect(username);
+    if (isConnected) return;
 
-            QMessageBox box;
-            box.setText("ПОДКЛЮЧЕНО");
-            box.exec();
-        }
-        else
-        {
-            QMessageBox::warning(0, "ОШИБКА", "Неверный IP адрес");
-        }
+    QString username = ui->usernameEdit->text().trimmed();
+    if (username.isEmpty()) {
+        ui->chatEdit->append("Введите имя перед подключением.");
+        return;
     }
-    else
-    {
-        QMessageBox::warning(0, "ОШИБКА", "Введите имя пользователя");
+
+    socket->connectToHost("127.0.0.1", 1234);
+    if (socket->waitForConnected(1000)) {
+        socket->write((username + "\n").toUtf8());
+        isConnected = true;
+        ui->chatEdit->append("Подключено как: " + username);
+    } else {
+        ui->chatEdit->append("Ошибка подключения к серверу.");
     }
 }
 
-void MainWindow::SendToServer(QString mssng)
+void MainWindow::on_sendButton_clicked()
 {
-    Data.clear();
-    QDataStream out(&Data, QIODevice::WriteOnly);
-    out.setVersion(QDataStream::Qt_6_2);
-    out << quint16(0) << username + ":\n-" + mssng;
-    out.device()->seek(0);
-    out << quint16(Data.size() - sizeof(quint16));
-    socket->write(Data);
-    mssg_buf = ui->lineEdit->text();
-    ui->lineEdit->clear();
-}
-
-void MainWindow::SendToServerConnect(QString mssng)
-{
-    Data.clear();
-    QDataStream out(&Data, QIODevice::WriteOnly);
-    out.setVersion(QDataStream::Qt_6_2);
-    out << quint16(0) << mssng;
-    out.device()->seek(0);
-    out << quint16(Data.size() - sizeof(quint16));
-    socket->write(Data);
-}
-
-void MainWindow::slotReadyRead()
-{
-    QDataStream in(socket);
-    in.setVersion(QDataStream::Qt_6_2);
-
-    if (in.status() == QDataStream::Ok)
-    {
-        for (;;)
-        {
-            if (nextBlockSize == 0)
-            {
-                if (socket->bytesAvailable() < 2)
-                {
-                    break;
-                }
-                in >> nextBlockSize;
-            }
-
-            if (socket->bytesAvailable() < nextBlockSize)
-            {
-                break;
-            }
-
-            QString mssng;
-            in >> mssng;
-            nextBlockSize = 0;
-
-            if (mssng == username + ":\n-" + mssg_buf)
-            {
-                ui->textBrowser->setAlignment(Qt::AlignRight);
-                ui->textBrowser->append("Вы:");
-                ui->textBrowser->append("-" + mssg_buf + "\n");
-            }
-            else if (mssng == username)
-            {
-                ui->textBrowser->setAlignment(Qt::AlignCenter);
-                ui->textBrowser->append("Вы подключились\n");
-            }
-            else if (mssng != username && mssng.indexOf(":\n") >= 0)
-            {
-                ui->textBrowser->setAlignment(Qt::AlignLeft);
-                ui->textBrowser->append(mssng + "\n");
-            }
-            else
-            {
-                ui->textBrowser->setAlignment(Qt::AlignCenter);
-                ui->textBrowser->append(mssng + " подключился\n");
-            }
-        }
+    if (!isConnected) {
+        ui->chatEdit->append("Сначала подключитесь к серверу.");
+        return;
     }
-    else
-    {
-        ui->textBrowser->append("Ошибка чтения...");
+
+    QString message = ui->messageEdit->text().trimmed();
+    QString recipient = ui->recipientEdit->text().trimmed();
+
+    if (message.isEmpty()) return;
+
+    if (!recipient.isEmpty()) {
+        socket->write(QString("/to:%1:%2\n").arg(recipient, message).toUtf8());
+    } else {
+        socket->write(message.toUtf8() + "\n");
     }
+
+    ui->messageEdit->clear();
 }
 
-void MainWindow::on_pushButton_2_clicked()
+void MainWindow::on_readyRead()
 {
-    SendToServer(ui->lineEdit->text());
+    QByteArray data = socket->readAll();
+    ui->chatEdit->append(QString::fromUtf8(data));
 }
-
-void MainWindow::on_lineEdit_returnPressed()
+void MainWindow::on_disconnectButton_clicked()
 {
-    SendToServer(ui->lineEdit->text());
-}
-
-void MainWindow::on_lineEdit_2_returnPressed()
-{
-    if (ui->lineEdit_3->text() != "")
-    {
-        username = ui->lineEdit_3->text();
-        socket->connectToHost(ui->lineEdit_2->text(), 2323);
-        if (socket->waitForConnected(3000))
-        {
-            SendToServerConnect(username);
-
-            QMessageBox box;
-            box.setText("ПОДКЛЮЧЕНО");
-            box.exec();
-        }
-        else
-        {
-            QMessageBox::warning(0, "ОШИБКА", "Неверный IP адрес");
-        }
+    if (!isConnected) {
+        ui->chatEdit->append("Нет активного подключения.");
+        return;
     }
-    else
-    {
-        QMessageBox::warning(0, "ОШИБКА", "Введите имя пользователя");
-    }
-}
 
-void MainWindow::on_pushButton_3_clicked()
-{
-    ui->textBrowser->clear();
-}
+    socket->disconnectFromHost();
+    socket->close();
+    isConnected = false;
 
+    ui->chatEdit->append("Отключено от сервера.");
+}

@@ -1,3 +1,5 @@
+// client/mainwindow.h
+
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
@@ -17,30 +19,15 @@ public:
     ~MainWindow();
 
 private slots:
-    void on_pushButton_clicked();
-
-    void on_pushButton_2_clicked();
-
-    void on_lineEdit_returnPressed();
-
-    void on_lineEdit_2_returnPressed();
-
-    void on_pushButton_3_clicked();
+    void on_connectButton_clicked();
+    void on_sendButton_clicked();
+    void on_readyRead();
+    void on_disconnectButton_clicked();
 
 private:
     Ui::MainWindow *ui;
     QTcpSocket *socket;
-    QString line_ip;
-    QString mssg_buf;
-    QString username;
-    QByteArray Data;
-    quint16 nextBlockSize;
-
-    void SendToServer(QString mssng);
-    void SendToServerConnect(QString mssng);
-
-public slots:
-    void slotReadyRead();
-
+    bool isConnected = false;
 };
+
 #endif // MAINWINDOW_H
